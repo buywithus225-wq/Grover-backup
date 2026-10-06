@@ -1,0 +1,4 @@
+serviceAccountKey.jsonnode_modules/
+.env
+*.log
+serviceAccountKey.json
