@@ -1,7 +1,3 @@
-// ========================================
-// GROVER MINING BOT - BACKEND SERVER
-// ========================================
-
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
@@ -11,19 +7,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ========================================
-// CONFIGURATION
-// ========================================
-
 const PROJECT_WALLET = 'UQBiiE8EcQ-tRSIi4HjKnCYjGJ0Wjh5SA84xyzbc-qdq5ws2';
-const ENTRY_FEE = 50000000; // 0.05 TON in nanotons
+const ENTRY_FEE = 50000000;
 const TONCENTER_API_KEY = '3d52927b8a0ce35f551859a71e37e30261a2f72aa5a9898715110a2625598597';
 
-// ========================================
-// FIREBASE SETUP
-// ========================================
-
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const serviceAccount = require('./serviceAccountKey.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -31,34 +19,30 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// ========================================
-// API ENDPOINTS
-// ========================================
-
-// Health check
 app.get('/', (req, res) => {
   res.json({ status: 'Grover backend is alive', time: new Date() });
 });
 
-// Verify payment
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const { telegram_id, username, wallet, tx_hash } = req.body;
+    const body = req.body;
+    const telegram_id = body.telegram_id;
+    const username = body.username;
+    const wallet = body.wallet;
+    const tx_hash = body.tx_hash;
 
     if (!telegram_id || !wallet || !tx_hash) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    console.log(`Verifying payment for user ${telegram_id}...`);
-
     const userRef = db.collection('users').doc(String(telegram_id));
     const userDoc = await userRef.get();
 
     if (userDoc.exists && userDoc.data().paid === true) {
-      return res.json({ success: true, message: 'Already verified', already_paid: true });
+      return res.json({ success: true, already_paid: true });
     }
 
-    const toncenterUrl = `https://toncenter.com/api/v2/getTransactions?address=${PROJECT_WALLET}&limit=50&api_key=${TONCENTER_API_KEY}`;
+    const toncenterUrl = 'https://toncenter.com/api/v2/getTransactions?address=' + PROJECT_WALLET + '&limit=50&api_key=' + TONCENTER_API_KEY;
     const response = await fetch(toncenterUrl);
     const data = await response.json();
 
@@ -69,8 +53,9 @@ app.post('/api/verify-payment', async (req, res) => {
     let paymentVerified = false;
     let paymentAmount = 0;
 
-    for (const tx of data.result) {
-      const txHash = tx.transaction_id?.hash;
+    for (let i = 0; i < data.result.length; i++) {
+      const tx = data.result[i];
+      const txHash = tx.transaction_id ? tx.transaction_id.hash : null;
       if (txHash === tx_hash) {
         const inMsg = tx.in_msg;
         if (inMsg && inMsg.value) {
@@ -88,7 +73,7 @@ app.post('/api/verify-payment', async (req, res) => {
       return res.status(400).json({ error: 'Payment not found or insufficient' });
     }
 
-    const userData = {
+    await userRef.set({
       telegram_id: String(telegram_id),
       username: username || 'unknown',
       wallet: wallet,
@@ -107,18 +92,9 @@ app.post('/api/verify-payment', async (req, res) => {
       referral_code: 'GRV' + String(telegram_id).slice(-6).toUpperCase(),
       referred_by: null,
       created_at: admin.firestore.FieldValue.serverTimestamp()
-    };
+    }, { merge: true });
 
-    await userRef.set(userData, { merge: true });
-
-    console.log(`Payment verified for ${telegram_id}`);
-
-    return res.json({
-      success: true,
-      message: 'Payment verified! Mining unlocked.',
-      balance: 0,
-      mining_rate: 1
-    });
+    return res.json({ success: true, balance: 0, mining_rate: 1 });
 
   } catch (error) {
     console.error('Verification error:', error);
@@ -126,10 +102,9 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
-// Check user status
 app.get('/api/user-status/:telegram_id', async (req, res) => {
   try {
-    const { telegram_id } = req.params;
+    const telegram_id = req.params.telegram_id;
     const userRef = db.collection('users').doc(String(telegram_id));
     const userDoc = await userRef.get();
 
@@ -143,23 +118,16 @@ app.get('/api/user-status/:telegram_id', async (req, res) => {
       paid: data.paid === true,
       balance: data.balance || 0,
       mining_level: data.mining_level || 1,
-      mining_rate: data.mining_rate || 1,
-      username: data.username
+      mining_rate: data.mining_rate || 1
     });
-
   } catch (error) {
-    console.error('Status check error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ========================================
-// START SERVER
-// ========================================
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Grover backend running on port ${PORT}`);
-  console.log(`Project wallet: ${PROJECT_WALLET}`);
-  console.log(`Payment verification: ACTIVE`);
+  console.log('Grover backend running on port ' + PORT);
+  console.log('Project wallet: ' + PROJECT_WALLET);
+  console.log('Payment verification: ACTIVE');
 });
