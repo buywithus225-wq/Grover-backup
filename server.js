@@ -11,7 +11,10 @@ const PROJECT_WALLET = 'UQBiiE8EcQ-tRSIi4HjKnCYjGJ0Wjh5SA84xyzbc-qdq5ws2';
 const ENTRY_FEE = 50000000;
 const TONCENTER_API_KEY = '3d52927b8a0ce35f551859a71e37e30261a2f72aa5a9898715110a2625598597';
 
-const serviceAccount = require('./serviceAccountKey.json');
+// Load Firebase key from base64 env variable
+const serviceAccount = JSON.parse(
+  Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8')
+);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -25,11 +28,10 @@ app.get('/', (req, res) => {
 
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const body = req.body;
-    const telegram_id = body.telegram_id;
-    const username = body.username;
-    const wallet = body.wallet;
-    const tx_hash = body.tx_hash;
+    const telegram_id = req.body.telegram_id;
+    const username = req.body.username;
+    const wallet = req.body.wallet;
+    const tx_hash = req.body.tx_hash;
 
     if (!telegram_id || !wallet || !tx_hash) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -70,7 +72,7 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 
     if (!paymentVerified) {
-      return res.status(400).json({ error: 'Payment not found or insufficient' });
+      return res.status(400).json({ error: 'Payment not found' });
     }
 
     await userRef.set({
@@ -97,7 +99,7 @@ app.post('/api/verify-payment', async (req, res) => {
     return res.json({ success: true, balance: 0, mining_rate: 1 });
 
   } catch (error) {
-    console.error('Verification error:', error);
+    console.error('Error:', error);
     return res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
