@@ -153,3 +153,54 @@ app.listen(PORT, () => {
   console.log('Project wallet: ' + PROJECT_WALLET);
   console.log('Payment verification: ACTIVE');
 });
+
+// ============================================
+// ADMIN SETTINGS ENDPOINTS (NEW)
+// ============================================
+
+app.get('/api/admin/settings', async (req, res) => {
+  try {
+    const doc = await db.collection('settings').doc('global').get();
+    if (!doc.exists) {
+      return res.json({
+        fakePool: '$100',
+        realPool: '$10',
+        payoutDay: 30,
+        maintFee: 15,
+        demoMode: 'off',
+        tasks: null,
+        events: null,
+        fakeUsers: null
+      });
+    }
+    return res.json(doc.data());
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/save-settings', async (req, res) => {
+  try {
+    const body = req.body;
+    const pin = body.pin;
+    const settings = body.settings;
+    const validPin = process.env.ADMIN_PIN || '1905';
+    if (pin !== validPin) {
+      return res.status(401).json({ error: 'Invalid PIN' });
+    }
+    await db.collection('settings').doc('global').set(settings, { merge: true });
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/global-users', async (req, res) => {
+  try {
+    const snapshot = await db.collection('users').count().get();
+    const realCount = snapshot.data().count || 0;
+    return res.json({ count: 1000 + realCount });
+  } catch (e) {
+    return res.json({ count: 1000 });
+  }
+});
