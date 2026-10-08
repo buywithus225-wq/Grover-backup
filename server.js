@@ -11,10 +11,15 @@ const PROJECT_WALLET = 'UQBiiE8EcQ-tRSIi4HjKnCYjGJ0Wjh5SA84xyzbc-qdq5ws2';
 const ENTRY_FEE = 50000000;
 const TONCENTER_API_KEY = '3d52927b8a0ce35f551859a71e37e30261a2f72aa5a9898715110a2625598597';
 
-// Load Firebase key from base64 env variable
-const serviceAccount = JSON.parse(
-  Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8')
-);
+// Load Firebase from base64 env variable
+let serviceAccount;
+try {
+  serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8'));
+  console.log('Firebase key loaded successfully');
+} catch (e) {
+  console.error('Firebase key error:', e.message);
+  process.exit(1);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -36,6 +41,8 @@ app.post('/api/verify-payment', async (req, res) => {
     if (!telegram_id || !wallet || !tx_hash) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    console.log('Verifying payment for user ' + telegram_id);
 
     const userRef = db.collection('users').doc(String(telegram_id));
     const userDoc = await userRef.get();
@@ -72,7 +79,7 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 
     if (!paymentVerified) {
-      return res.status(400).json({ error: 'Payment not found' });
+      return res.status(400).json({ error: 'Payment not found or insufficient' });
     }
 
     await userRef.set({
@@ -86,20 +93,28 @@ app.post('/api/verify-payment', async (req, res) => {
       balance: 0,
       total_mined: 0,
       mining_level: 1,
-      mining_rate: 1,
-      last_collect: Date.now(),
+      mining_rate: 5,
+      last_claim: Date.now(),
       ads_watched_today: 0,
       spin_used_today: 0,
       checkin_streak: 0,
       referral_code: 'GRV' + String(telegram_id).slice(-6).toUpperCase(),
       referred_by: null,
+      referral_count: 0,
       created_at: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    return res.json({ success: true, balance: 0, mining_rate: 1 });
+    console.log('Payment verified for ' + telegram_id);
+
+    return res.json({
+      success: true,
+      message: 'Payment verified! Mining unlocked.',
+      balance: 0,
+      mining_rate: 5
+    });
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Verification error:', error);
     return res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
@@ -120,9 +135,12 @@ app.get('/api/user-status/:telegram_id', async (req, res) => {
       paid: data.paid === true,
       balance: data.balance || 0,
       mining_level: data.mining_level || 1,
-      mining_rate: data.mining_rate || 1
+      mining_rate: data.mining_rate || 5,
+      referral_count: data.referral_count || 0
     });
+
   } catch (error) {
+    console.error('Status check error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });
