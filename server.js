@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const fetch = require('node-fetch');
 
 const app = express();
@@ -11,21 +12,22 @@ const PROJECT_WALLET = 'UQBiiE8EcQ-tRSIi4HjKnCYjGJ0Wjh5SA84xyzbc-qdq5ws2';
 const ENTRY_FEE = 50000000;
 const TONCENTER_API_KEY = '3d52927b8a0ce35f551859a71e37e30261a2f72aa5a9898715110a2625598597';
 
-// Load Firebase from base64 env variable
 let serviceAccount;
 try {
-  serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8'));
-  console.log('Firebase key loaded successfully');
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64 || '';
+  console.log('Base64 length:', b64.length);
+  serviceAccount = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'));
+  console.log('Firebase key loaded for project:', serviceAccount.project_id);
 } catch (e) {
   console.error('Firebase key error:', e.message);
   process.exit(1);
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+initializeApp({
+  credential: cert(serviceAccount)
 });
 
-const db = admin.firestore();
+const db = getFirestore();
 
 app.get('/', (req, res) => {
   res.json({ status: 'Grover backend is alive', time: new Date() });
@@ -88,7 +90,7 @@ app.post('/api/verify-payment', async (req, res) => {
       wallet: wallet,
       paid: true,
       paid_amount: paymentAmount,
-      paid_at: admin.firestore.FieldValue.serverTimestamp(),
+      paid_at: FieldValue.serverTimestamp(),
       tx_hash: tx_hash,
       balance: 0,
       total_mined: 0,
@@ -101,7 +103,7 @@ app.post('/api/verify-payment', async (req, res) => {
       referral_code: 'GRV' + String(telegram_id).slice(-6).toUpperCase(),
       referred_by: null,
       referral_count: 0,
-      created_at: admin.firestore.FieldValue.serverTimestamp()
+      created_at: FieldValue.serverTimestamp()
     }, { merge: true });
 
     console.log('Payment verified for ' + telegram_id);
