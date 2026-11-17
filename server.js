@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
+const { initializeApp, cert, getFirestore, FieldValue } = require('firebase-admin');
 const crypto = require('crypto');
 
 // 1. Initialize Firebase
@@ -11,11 +11,11 @@ if (process.env.FIREBASE_KEY) {
   serviceAccount = require('./serviceAccountKey.json');
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+initializeApp({
+  credential: cert(serviceAccount)
 });
 
-const db = admin.firestore();
+const db = getFirestore();
 
 // 2. Setup Express Server
 const app = express();
@@ -128,7 +128,7 @@ app.post('/api/withdraw-diamond', async (req, res) => {
     const data = doc.data();
     if (data.diamonds < 1) return res.status(400).json({ error: "You need a Diamond to withdraw!" });
     await userRef.update({ diamonds: data.diamonds - 1 });
-    await db.collection('withdrawal_requests').add({ userId: userId, type: 'Diamond', amount: 1, walletAddress: walletAddress, status: 'Pending', createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('withdrawal_requests').add({ userId: userId, type: 'Diamond', amount: 1, walletAddress: walletAddress, status: 'Pending', createdAt: FieldValue.serverTimestamp() });
     res.json({ success: true, message: "Request submitted!" });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
