@@ -1,19 +1,17 @@
 {
   "name": "grover-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend for Grover Miner",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^18.0.10",
-    "express": "^5.3.0",
-    "firebase-admin": "^14.5.1"
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "firebase-admin": "^11.11.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
