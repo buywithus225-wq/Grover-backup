@@ -71,6 +71,7 @@ app.post('/api/claim', async (req, res) => {
     if (Date.now() - data.lastClaimTime < 86400000) return res.status(400).json({ error: "Mining not ready" });
     let rate = 5 * data.vipLevel;
     await userRef.update({ balance: data.balance + rate, lastClaimTime: Date.now() });
+    setTimeout(() => { sendMiningNotification(userId); }, 86400000); // 24 hours
     res.json({ success: true, newBalance: data.balance + rate });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
@@ -114,6 +115,47 @@ app.post('/api/p2p', async (req, res) => {
     res.json({ success: true, message: "Sent successfully" });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
+// ============================================
+// ADMIN ROUTES & NOTIFICATIONS
+// ============================================
+const ADMIN_PIN = process.env.ADMIN_PIN || '1905';
+
+app.post('/api/admin/verify', (req, res) => {
+  const { pin } = req.body;
+  if (pin === ADMIN_PIN) res.json({ success: true });
+  else res.status(401).json({ success: false });
+});
+
+app.get('/api/admin/data', async (req, res) => {
+  try {
+    const settingsDoc = await db.collection('settings').doc('global').get();
+    if (!settingsDoc.exists) return res.json({ fakeUsers: [], tasks: [], prizePool: '50' });
+    res.json(settingsDoc.data());
+  } catch (e) { res.status(500).json({ error: "Error" }); }
+});
+
+app.post('/api/admin/save', async (req, res) => {
+  try {
+    await db.collection('settings').doc('global').set(req.body, { merge: true });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: "Error" }); }
+});
+
+async function sendMiningNotification(chatId) {
+  try {
+    const message = "⛏️ *Your mining is full!* \n\nTap below to open Grover Miner and claim your GROV!";
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[ { text: "💰 Open Grover Miner", web_app: { url: "https://buywithus225-wq.github.io/Grover-miner-app/" } } ]] }
+      })
+    });
+  } catch (e) { console.log("Notification failed:", e); }
+}
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Running n port ${PORT}`));
