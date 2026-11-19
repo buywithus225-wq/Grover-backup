@@ -1,9 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const { initializeApp, cert, getFirestore, FieldValue } = require('firebase-admin');
+const admin = require('firebase-admin');
 const crypto = require('crypto');
 
-// 1. Initialize Firebase
 let serviceAccount;
 if (process.env.FIREBASE_KEY) {
   serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
@@ -11,18 +10,17 @@ if (process.env.FIREBASE_KEY) {
   serviceAccount = require('./serviceAccountKey.json');
 }
 
-initializeApp({
-  credential: cert(serviceAccount)
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
 });
 
-const db = getFirestore();
+const db = admin.firestore();
 
-// 2. Setup Express Server
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const BOT_TOKEN = '8870298376:AAH_9bg2YK0O5Rc4CBzgZIxWloV0Rcuf9ns'; // <--- CHANGE THIS
+const BOT_TOKEN = '8870298376:AAH_9bg2YK0O5Rc4CBzgZIxWloV0Rcuf9ns'; // 
 
 function verifyTelegramData(initData) {
   const urlParams = new URLSearchParams(initData);
@@ -54,7 +52,7 @@ app.post('/api/sync', async (req, res) => {
     const userRef = db.collection('users').doc(userId);
     const doc = await userRef.get();
     if (!doc.exists) {
-      await userRef.set({ username: auth.user.username || 'Unknown', balance: 0, diamonds: 0, hasPaid: false, referralCount: 0, vipLevel: 1, lastClaimTime: Date.now(), checkinDay: 1, lastCheckin: null, extraSpinsUsed: 0, lastSpin: null });
+      await userRef.set({ username: auth.user.username || 'Unknown', balance: 0, diamonds: 0, hasPaid: false, referralCount: 0, vipLevel: 1, lastClaimTime: Date.now() });
       return res.json({ isNew: true, user: { balance: 0, diamonds: 0, hasPaid: false, vipLevel: 1 } });
     }
     res.json({ isNew: false, user: doc.data() });
@@ -114,22 +112,6 @@ app.post('/api/p2p', async (req, res) => {
     if (data.balance < totalDeducted) return res.status(400).json({ error: "Insufficient balance" });
     await senderRef.update({ balance: data.balance - totalDeducted });
     res.json({ success: true, message: "Sent successfully" });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
-
-app.post('/api/withdraw-diamond', async (req, res) => {
-  try {
-    const { initData, walletAddress } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    const userId = String(auth.user.id);
-    const userRef = db.collection('users').doc(userId);
-    const doc = await userRef.get();
-    const data = doc.data();
-    if (data.diamonds < 1) return res.status(400).json({ error: "You need a Diamond to withdraw!" });
-    await userRef.update({ diamonds: data.diamonds - 1 });
-    await db.collection('withdrawal_requests').add({ userId: userId, type: 'Diamond', amount: 1, walletAddress: walletAddress, status: 'Pending', createdAt: FieldValue.serverTimestamp() });
-    res.json({ success: true, message: "Request submitted!" });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
