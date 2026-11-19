@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grover Admin</title>
+<style>
+body { background: #030a1a; color: #fff; font-family: sans-serif; padding: 20px; }
+.container { max-width: 500px; margin: auto; background: #0a1428; border: 2px solid #8b5cf6; border-radius: 12px; padding: 20px; }
+input, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 6px; border: 1px solid #555; background: #111; color: white; }
+button { background: #8b5cf6; cursor: pointer; font-weight: bold; border: none; }
+button:hover { background: #6b46c1; }
+#login { text-align: center; }
+#dashboard { display: none; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; }
+.row input { flex: 1; }
+.row button { flex: 0 0 auto; width: auto; }
+.list-item { background: #111; padding: 10px; border-radius: 6px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="login">
+    <h2>🔐 Grover Admin</h2>
+    <input type="password" id="pin" placeholder="Enter Admin PIN">
+    <button onclick="verifyPin()">Unlock</button>
+  </div>
+  <div id="dashboard">
+    <h2>Dashboard</h2>
+    <h3>🏆 Leaderboard (Fake Users)</h3>
+    <div id="leaderboardList"></div>
+    <div class="row">
+      <input type="text" id="fakeName" placeholder="Name">
+      <input type="number" id="fakeRefs" placeholder="Refs">
+      <button onclick="addFake()">+ Add</button>
+    </div>
+    
+    <h3>📋 Tasks</h3>
+    <div id="taskList"></div>
+    <div class="row">
+      <input type="text" id="taskName" placeholder="Task Name">
+      <input type="number" id="taskReward" placeholder="Reward">
+      <button onclick="addTask()">+ Add</button>
+    </div>
+  </div>
+</div>
+<script>
+const API = 'https://grover-backup.onrender.com'; 
+let adminData = { fakeUsers: [], tasks: [] };
+
+async function verifyPin() {
+  const pin = document.getElementById('pin').value;
+  const res = await fetch(API + '/api/admin/verify', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pin })
+  });
+  if (res.ok) {
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    loadData();
+  } else { alert('Wrong PIN'); }
+}
+
+async function loadData() {
+  const res = await fetch(API + '/api/admin/data');
+  const data = await res.json();
+  adminData.fakeUsers = data.fakeUsers || [];
+  adminData.tasks = data.tasks || [];
+  renderUI();
+}
+
+function renderUI() {
+  const lb = document.getElementById('leaderboardList'); lb.innerHTML = '';
+  adminData.fakeUsers.sort((a,b)=>b.refs-a.refs).forEach((u,i) => {
+    lb.innerHTML += `<div class="list-item">#${i+1} ${u.name} - ${u.refs} refs</div>`;
+  });
+  
+  const tl = document.getElementById('taskList'); tl.innerHTML = '';
+  adminData.tasks.forEach(t => {
+    tl.innerHTML += `<div class="list-item">${t.name} (+${t.reward} GROV)</div>`;
+  });
+}
+
+async function saveData() {
+  await fetch(API + '/api/admin/save', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(adminData)
+  });
+}
+
+function addFake() {
+  const name = document.getElementById('fakeName').value;
+  const refs = parseInt(document.getElementById('fakeRefs').value);
+  if (!name || !refs) return;
+  adminData.fakeUsers.push({ name, refs });
+  renderUI(); saveData();
+  document.getElementById('fakeName').value = '';
+  document.getElementById('fakeRefs').value = '';
+}
+
+function addTask() {
+  const name = document.getElementById('taskName').value;
+  const reward = parseInt(document.getElementById('taskReward').value);
+  if (!name || !reward) return;
+  adminData.tasks.push({ name, reward });
+  renderUI(); saveData();
+  document.getElementById('taskName').value = '';
+  document.getElementById('taskReward').value = '';
+}
+</script>
+</body>
+</html>
