@@ -59,23 +59,42 @@ app.post('/api/sync', async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.post('/api/claim', async (req, res) => {
+
+app.post('/api/sync', async (req, res) => {
   try {
     const { initData } = req.body;
     const auth = verifyTelegramData(initData);
     if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
+    
     const userId = String(auth.user.id);
+    
+    // --- FORCE JOIN LOGIC (Optional: Uncomment when your channel is ready) ---
+    // const REQUIRED_CHANNEL = '@YourChannel';
+    // try {
+    //   const chatMember = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${REQUIRED_CHANNEL}&user_id=${userId}`).then(r => r.json());
+    //   if (!chatMember.ok || ['left', 'kicked'].includes(chatMember.result.status)) {
+    //     return res.status(403).json({ error: "JoinChannel", channel: REQUIRED_CHANNEL });
+    //   }
+    // } catch(e) { console.log("Channel check failed", e); }
+
     const userRef = db.collection('users').doc(userId);
     const doc = await userRef.get();
-    const data = doc.data();
-    if (Date.now() - data.lastClaimTime < 86400000) return res.status(400).json({ error: "Mining not ready" });
-    let rate = 5 * data.vipLevel;
-    await userRef.update({ balance: data.balance + rate, lastClaimTime: Date.now() });
-    setTimeout(() => { sendMiningNotification(userId); }, 86400000); // 24 hours
-    res.json({ success: true, newBalance: data.balance + rate });
+    if (!doc.exists) {
+      // NEW USER: Automatically sets hasPaid to true for you to test
+      await userRef.set({ username: auth.user.username || 'Unknown', balance: 100, diamonds: 0, hasPaid: true, referralCount: 0, vipLevel: 1, lastClaimTime: Date.now() });
+      return res.json({ isNew: true, user: { balance: 100, diamonds: 0, hasPaid: true, vipLevel: 1 } });
+    }
+    
+    // EXISTING USER: If they paid before but Firebase says false, force it to true so you can enter
+    const userData = doc.data();
+    if (userData.hasPaid === false) {
+      await userRef.update({ hasPaid: true });
+      userData.hasPaid = true;
+    }
+    
+    res.json({ isNew: false, user: userData });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
-
 app.post('/api/spin', async (req, res) => {
   try {
     const { initData, isRespin } = req.body;
