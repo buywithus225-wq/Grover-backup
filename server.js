@@ -175,6 +175,19 @@ async function sendMiningNotification(chatId) {
     });
   } catch (e) { console.log("Notification failed:", e); }
 }
+// Route: Save Payment Status
+app.post('/api/pay', async (req, res) => {
+  try {
+    const { initData } = req.body;
+    const auth = verifyTelegramData(initData);
+    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
+    
+    const userId = String(auth.user.id);
+    await db.collection('users').doc(userId).set({ hasPaid: true }, { merge: true });
+    
+    res.json({ success: true, message: "Payment saved to cloud!" });
+  } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Running n port ${PORT}`));
