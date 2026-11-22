@@ -175,7 +175,7 @@ async function sendMiningNotification(chatId) {
     });
   } catch (e) { console.log("Notification failed:", e); }
 }
-// Route: Save Payment Status
+// Route: Save Payment Status & Give Welcome Bonus
 app.post('/api/pay', async (req, res) => {
   try {
     const { initData } = req.body;
@@ -183,9 +183,21 @@ app.post('/api/pay', async (req, res) => {
     if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
     
     const userId = String(auth.user.id);
-    await db.collection('users').doc(userId).set({ hasPaid: true }, { merge: true });
+    const userRef = db.collection('users').doc(userId);
+    const doc = await userRef.get();
     
-    res.json({ success: true, message: "Payment saved to cloud!" });
+    // If they haven't paid yet, give them the 100 bonus and mark as paid
+    if (!doc.exists || doc.data().hasPaid === false) {
+      await userRef.set({ 
+        hasPaid: true,
+        balance: 100,
+        welcomeClaimed: true
+      }, { merge: true });
+    } else {
+      await userRef.set({ hasPaid: true }, { merge: true });
+    }
+    
+    res.json({ success: true, message: "Payment saved and bonus applied!" });
   } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
