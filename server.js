@@ -3,203 +3,154 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 
+// --- SECRETS (Loaded safely from Render Environment Variables) ---
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const ADMIN_PIN = process.env.ADMIN_PIN;
+const FIREBASE_KEY = process.env.FIREBASE_KEY;
+
+if (!BOT_TOKEN) throw new Error('Missing BOT_TOKEN');
+if (!ADMIN_PIN) throw new Error('Missing ADMIN_PIN');
+if (!FIREBASE_KEY) throw new Error('Missing FIREBASE_KEY');
+
+const DAY_MS = 86400000;
+const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000;
+
+// --- FIREBASE INIT ---
 let serviceAccount;
-if (process.env.FIREBASE_KEY) {
-  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-} else {
-  serviceAccount = require('./serviceAccountKey.json');
+try {
+    serviceAccount = JSON.parse(FIREBASE_KEY);
+    if (serviceAccount.private_key) {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+} catch (error) {
+    throw new Error('Invalid FIREBASE_KEY format');
 }
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential.cert(serviceAccount)
 });
 
 const db = admin.firestore();
-
 const app = express();
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
-const BOT_TOKEN = '8870298376:AAH_9bg2YK0O5Rc4CBzgZIxWloV0Rcuf9ns'; // 
-
+// --- TELEGRAM AUTHENTICATION ---
 function verifyTelegramData(initData) {
-  const urlParams = new URLSearchParams(initData);
-  const hash = urlParams.get('hash');
-  urlParams.delete('hash');
-  urlParams.sort();
-  let dataCheckString = '';
-  for (const [key, value] of urlParams.entries()) {
-    dataCheckString += `${key}=${value}\n`;
-  }
-  dataCheckString = dataCheckString.slice(0, -1);
-  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
-  const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-  if (calculatedHash === hash) {
-    const user = JSON.parse(urlParams.get('user'));
-    return { isValid: true, user: user };
-  }
-  return { isValid: false };
+    try {
+        if (!initData || typeof initData !== 'string') return { isValid: false };
+        const params = new URLSearchParams(initData);
+        const hash = params.get('hash');
+        if (!hash) return { isValid: false };
+        
+        params.delete('hash');
+        params.sort();
+        const dataCheckString = [...params.entries()].map(([key, value]) => `${key}=${value}`).join('\n');
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+        const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+        
+        if (calculatedHash !== hash) return { isValid: false };
+        
+        const user = JSON.parse(params.get('user'));
+        return { isValid: true, user };
+    } catch (error) {
+        return { isValid: false };
+    }
 }
 
-app.get('/', (req, res) => res.json({ status: "Grover Backend is alive" }));
+function requireTelegramUser(req, res, next) {
+    const auth = verifyTelegramData(req.body && req.body.initData);
+    if (!auth.isValid) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    req.telegramUser = auth.user;
+    next();
+}
 
-app.post('/api/sync', async (req, res) => {
-  try {
-    const { initData } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    const userId = String(auth.user.id);
-    const userRef = db.collection('users').doc(userId);
-    const doc = await userRef.get();
-    if (!doc.exists) {
-      await userRef.set({ username: auth.user.username || 'Unknown', balance: 0, diamonds: 0, hasPaid: false, referralCount: 0, vipLevel: 1, lastClaimTime: Date.now() });
-      return res.json({ isNew: true, user: { balance: 0, diamonds: 0, hasPaid: false, vipLevel: 1 } });
+// --- ROUTES ---
+app.get('/', (req, res) => res.json({ status: 'Grover Backend is alive' }));
+
+app.post('/api/sync', requireTelegramUser, async (req, res) => {
+    try {
+        const user = req.telegramUser;
+        const userRef = db.collection('users').doc(String(user.id));
+
+        const result = await db.runTransaction(async tx => {
+            const doc = await tx.get(userRef);
+            if (!doc.exists) {
+                const newUser = {
+                    telegramId: String(user.id), username: user.username || '', firstName: user.first_name || '',
+                    balance: 0, diamonds: 0, hasPaid: false, referralCount: 0, vipLevel: 1,
+                    lastClaimTime: 0, lastSpinDate: '', extraSpinsUsed: 0, createdAt: Date.now()
+                };
+                tx.set(userRef, newUser);
+                return { isNew: true, user: newUser };
+            }
+            return { isNew: false, user: doc.data() };
+        });
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Server Error' });
     }
-    res.json({ isNew: false, user: doc.data() });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
+app.post('/api/claim', requireTelegramUser, async (req, res) => {
+    try {
+        const userId = String(req.telegramUser.id);
+        const userRef = db.collection('users').doc(userId);
+        const now = Date.now();
 
-app.post('/api/sync', async (req, res) => {
-  try {
-    const { initData } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    
-    const userId = String(auth.user.id);
-    
-    // --- FORCE JOIN LOGIC (Optional: Uncomment when your channel is ready) ---
-    // const REQUIRED_CHANNEL = '@YourChannel';
-    // try {
-    //   const chatMember = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${REQUIRED_CHANNEL}&user_id=${userId}`).then(r => r.json());
-    //   if (!chatMember.ok || ['left', 'kicked'].includes(chatMember.result.status)) {
-    //     return res.status(403).json({ error: "JoinChannel", channel: REQUIRED_CHANNEL });
-    //   }
-    // } catch(e) { console.log("Channel check failed", e); }
+        const result = await db.runTransaction(async tx => {
+            const doc = await tx.get(userRef);
+            if (!doc.exists) return { status: 404, body: { success: false, error: 'User not found' } };
+            
+            const data = doc.data() || {};
+            const lastClaimTime = Number(data.lastClaimTime || 0);
+            const elapsed = now - lastClaimTime;
 
-    const userRef = db.collection('users').doc(userId);
-    const doc = await userRef.get();
-    if (!doc.exists) {
-      // NEW USER: Automatically sets hasPaid to true for you to test
-      await userRef.set({ username: auth.user.username || 'Unknown', balance: 100, diamonds: 0, hasPaid: true, referralCount: 0, vipLevel: 1, lastClaimTime: Date.now() });
-      return res.json({ isNew: true, user: { balance: 100, diamonds: 0, hasPaid: true, vipLevel: 1 } });
+            if (elapsed < DAY_MS) {
+                return { status: 400, body: { success: false, error: 'Mining not ready', remainingMs: DAY_MS - elapsed } };
+            }
+
+            const vipLevel = Math.min(6, Math.max(1, Math.floor(Number(data.vipLevel) || 1)));
+            const reward = 5 * vipLevel;
+            const newBalance = Number(data.balance || 0) + reward;
+
+            tx.update(userRef, { balance: newBalance, lastClaimTime: now });
+            return { status: 200, body: { success: true, reward, newBalance, nextClaimAt: now + DAY_MS } };
+        });
+
+        res.status(result.status).json(result.body);
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Server Error' });
     }
-    
-    // EXISTING USER: If they paid before but Firebase says false, force it to true so you can enter
-    const userData = doc.data();
-    if (userData.hasPaid === false) {
-      await userRef.update({ hasPaid: true });
-      userData.hasPaid = true;
-    }
-    
-    res.json({ isNew: false, user: userData });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
-app.post('/api/spin', async (req, res) => {
-  try {
-    const { initData, isRespin } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    const userId = String(auth.user.id);
-    const userRef = db.collection('users').doc(userId);
-    const doc = await userRef.get();
-    const data = doc.data();
-    const today = new Date().toDateString();
-    if (!isRespin && data.lastSpin === today) {
-      if (data.extraSpinsUsed >= 10) return res.status(400).json({ error: "Daily limit reached" });
-    }
-    const prize = Math.floor(Math.random() * 6) + 1;
-    const updateData = { balance: data.balance + prize };
-    if (!isRespin) { updateData.lastSpin = today; } 
-    else { updateData.extraSpinsUsed = (data.extraSpinsUsed || 0) + 1; }
-    await userRef.update(updateData);
-    res.json({ success: true, prize: prize, newBalance: data.balance + prize });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.post('/api/p2p', async (req, res) => {
-  try {
-    const { initData, recipientCode, amount } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    const senderId = String(auth.user.id);
-    if (amount <= 0 || amount > 10000) return res.status(400).json({ error: "Invalid amount" });
-    const senderRef = db.collection('users').doc(senderId);
-    const doc = await senderRef.get();
-    const data = doc.data();
-    const fee = amount * 0.05;
-    const totalDeducted = amount + fee;
-    if (data.balance < totalDeducted) return res.status(400).json({ error: "Insufficient balance" });
-    await senderRef.update({ balance: data.balance - totalDeducted });
-    res.json({ success: true, message: "Sent successfully" });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
+// --- PAYMENT ROUTE (Adds 100 GROV bonus) ---
+app.post('/api/pay', requireTelegramUser, async (req, res) => {
+    try {
+        const userId = String(req.telegramUser.id);
+        const userRef = db.collection('users').doc(userId);
+        const doc = await userRef.get();
+        
+        if (!doc.exists || doc.data().hasPaid === false) {
+            await userRef.set({ hasPaid: true, balance: 100 }, { merge: true });
+        } else {
+            await userRef.set({ hasPaid: true }, { merge: true });
+        }
+        res.json({ success: true, message: "Payment saved" });
+    } catch (error) { res.status(500).json({ success: false, error: "Server Error" }); }
 });
-// ============================================
-// ADMIN ROUTES & NOTIFICATIONS
-// ============================================
-const ADMIN_PIN = process.env.ADMIN_PIN || '1905';
 
+// --- ADMIN ROUTES ---
 app.post('/api/admin/verify', (req, res) => {
-  const { pin } = req.body;
-  if (pin === ADMIN_PIN) res.json({ success: true });
-  else res.status(401).json({ success: false });
-});
-
-app.get('/api/admin/data', async (req, res) => {
-  try {
-    const settingsDoc = await db.collection('settings').doc('global').get();
-    if (!settingsDoc.exists) return res.json({ fakeUsers: [], tasks: [], prizePool: '50' });
-    res.json(settingsDoc.data());
-  } catch (e) { res.status(500).json({ error: "Error" }); }
-});
-
-app.post('/api/admin/save', async (req, res) => {
-  try {
-    await db.collection('settings').doc('global').set(req.body, { merge: true });
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: "Error" }); }
-});
-
-async function sendMiningNotification(chatId) {
-  try {
-    const message = "⛏️ *Your mining is full!* \n\nTap below to open Grover Miner and claim your GROV!";
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[ { text: "💰 Open Grover Miner", web_app: { url: "https://buywithus225-wq.github.io/Grover-miner-app/" } } ]] }
-      })
-    });
-  } catch (e) { console.log("Notification failed:", e); }
-}
-// Route: Save Payment Status & Give Welcome Bonus
-app.post('/api/pay', async (req, res) => {
-  try {
-    const { initData } = req.body;
-    const auth = verifyTelegramData(initData);
-    if (!auth.isValid) return res.status(401).json({ error: "Unauthorized" });
-    
-    const userId = String(auth.user.id);
-    const userRef = db.collection('users').doc(userId);
-    const doc = await userRef.get();
-    
-    // If they haven't paid yet, give them the 100 bonus and mark as paid
-    if (!doc.exists || doc.data().hasPaid === false) {
-      await userRef.set({ 
-        hasPaid: true,
-        balance: 100,
-        welcomeClaimed: true
-      }, { merge: true });
+    const { pin } = req.body;
+    if (pin === ADMIN_PIN) {
+        res.json({ success: true });
     } else {
-      await userRef.set({ hasPaid: true }, { merge: true });
+        res.status(401).json({ success: false });
     }
-    
-    res.json({ success: true, message: "Payment saved and bonus applied!" });
-  } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
+// --- START SERVER ---
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Running n port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
