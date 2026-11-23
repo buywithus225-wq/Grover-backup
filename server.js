@@ -116,6 +116,10 @@ app.post('/api/claim', requireTelegramUser, async (req, res) => {
             const newBalance = Number(data.balance || 0) + reward;
 
             tx.update(userRef, { balance: newBalance, lastClaimTime: now });
+            // Set a 24-hour timer for the push notification
+setTimeout(() => {
+  sendMiningNotification(userId);
+}, 86400000);
             return { status: 200, body: { success: true, reward, newBalance, nextClaimAt: now + DAY_MS } };
         });
 
