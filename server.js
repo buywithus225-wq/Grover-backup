@@ -116,10 +116,6 @@ app.post('/api/claim', requireTelegramUser, async (req, res) => {
             const newBalance = Number(data.balance || 0) + reward;
 
             tx.update(userRef, { balance: newBalance, lastClaimTime: now });
-            // Set a 24-hour timer for the push notification
-setTimeout(() => {
-  sendMiningNotification(userId);
-}, 86400000);
             return { status: 200, body: { success: true, reward, newBalance, nextClaimAt: now + DAY_MS } };
         });
 
@@ -128,6 +124,12 @@ setTimeout(() => {
         res.status(500).json({ success: false, error: 'Server Error' });
     }
 });
+// If claim was successful, start the 24h notification timer in the background
+if (result.status === 200 && result.body.success) {
+    setTimeout(() => {
+        sendMiningNotification(userId);
+    }, 86400000);
+}
 
 // --- PAYMENT ROUTE (Adds 100 GROV bonus) ---
 app.post('/api/pay', requireTelegramUser, async (req, res) => {
