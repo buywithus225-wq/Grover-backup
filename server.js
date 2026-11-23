@@ -150,7 +150,26 @@ app.post('/api/admin/verify', (req, res) => {
         res.status(401).json({ success: false });
     }
 });
-
+// --- 24-HOUR PUSH NOTIFICATION ---
+async function sendMiningNotification(chatId) {
+  try {
+    const message = "⛏️ *Your mining is full!* \n\nTap below to open Grover Miner and claim your GROV!";
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'Markdown',
+        reply_markup: { 
+          inline_keyboard: [[ 
+            { text: "💰 Open Grover Miner", web_app: { url: "https://grover-miner-app.onrender.com/" } } 
+          ]] 
+        }
+      })
+    });
+  } catch (e) { console.log("Notification failed:", e); }
+}
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
