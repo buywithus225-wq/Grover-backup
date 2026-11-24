@@ -270,6 +270,23 @@ app.post('/api/admin/approve-withdrawal', async (req, res) => {
   await db.collection('withdrawals').doc(withdrawalId).update({ status: 'Approved' });
   res.json({ success: true });
 });
+// --- GET TRANSACTIONS ---
+app.post('/api/transactions', requireTelegramUser, async (req, res) => {
+  try {
+    const userId = String(req.telegramUser.id);
+    const snapshot = await db.collection('transactions')
+      .where('userId', '==', userId)
+      .orderBy('date', 'desc')
+      .limit(10)
+      .get();
+      
+    const transactions = [];
+    snapshot.forEach(doc => transactions.push(doc.data()));
+    res.json({ success: true, transactions });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+});
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
