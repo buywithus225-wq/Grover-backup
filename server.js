@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const path = require('path'); 
 
 // --- SECRETS (Loaded safely from Render Environment Variables) ---
 const BOT_TOKEN = process.env.BOT_TOKEN;
