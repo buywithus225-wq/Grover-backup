@@ -176,6 +176,100 @@ async function sendMiningNotification(chatId) {
     });
   } catch (e) { console.log("Notification failed:", e); }
 }
+// --- P2P TRANSFER (Saves to Database) ---
+app.post('/api/p2p', requireTelegramUser, async (req, res) => {
+  try {
+    const { recipientCode, amount } = req.body;
+    const senderId = String(req.telegramUser.id);
+    if (!recipientCode || amount <= 0 || amount > 10000) return res.status(400).json({ success: false, error: 'Invalid data' });
+
+    const senderRef = db.collection('users').doc(senderId);
+    const senderDoc = await senderRef.get();
+    const senderData = senderDoc.data();
+
+    const fee = amount * 0.05;
+    const totalDeducted = amount + fee;
+    if (senderData.balance < totalDeducted) return res.status(400).json({ success: false, error: 'Insufficient balance' });
+
+    // Find recipient
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('referralCode', '==', recipientCode).get();
+    if (snapshot.empty) return res.status(404).json({ success: false, error: 'Recipient not found' });
+
+    const recipientDoc = snapshot.docs[0];
+    const recipientData = recipientDoc.data();
+
+    await db.runTransaction(async (t) => {
+      t.update(senderRef, { balance: senderData.balance - totalDeducted });
+      t.update(db.collection('users').doc(recipientDoc.id), { balance: recipientData.balance + amount });
+      
+      // Save Transaction History for Sender
+      t.set(db.collection('transactions').doc(), { type: 'P2P Sent', userId: senderId, amount: amount, fee: fee, to: recipientCode, date: Date.now() });
+      // Save Transaction History for Receiver
+      t.set(db.collection('transactions').doc(), { type: 'P2P Received', userId: recipientDoc.id, amount: amount, from: senderData.referralCode, date: Date.now() });
+    });
+
+    res.json({ success: true, newBalance: senderData.balance - totalDeducted });
+  } catch (error) { res.status(500).json({ success: false, error: 'Server Error' }); }
+});
+
+// --- DEDUCT GROV (For Mystery Box & Scratch Card) ---
+app.post('/api/deduct-grov', requireTelegramUser, async (req, res) => {
+  try {
+    const { amount, action } = req.body;
+    const userId = String(req.telegramUser.id);
+    const userRef = db.collection('users').doc(userId);
+    const doc = await userRef.get();
+    const data = doc.data();
+
+    if (data.balance < amount) return res.status(400).json({ success: false, error: 'Insufficient balance' });
+
+    await db.runTransaction(async (t) => {
+      t.update(userRef, { balance: data.balance - amount });
+      // Save Receipt
+      t.set(db.collection('transactions').doc(), { type: action, userId: userId, amount: -amount, date: Date.now() });
+    });
+
+    res.json({ success: true, newBalance: data.balance - amount });
+  } catch (error) { res.status(500).json({ success: false, error: 'Server Error' }); }
+});
+
+// --- WITHDRAWAL (Saves to Pending) ---
+app.post('/api/withdraw', requireTelegramUser, async (req, res) => {
+  try {
+    const { amount, walletAddress } = req.body;
+    const userId = String(req.telegramUser.id);
+    const userRef = db.collection('users').doc(userId);
+    const doc = await userRef.get();
+    const data = doc.data();
+
+    if (data.balance < amount || amount < 1000) return res.status(400).json({ success: false, error: 'Invalid amount' });
+
+    await db.runTransaction(async (t) => {
+      t.update(userRef, { balance: data.balance - amount });
+      t.set(db.collection('withdrawals').doc(), { 
+        userId: userId, amount: amount, walletAddress: walletAddress, status: 'Pending', date: Date.now() 
+      });
+      t.set(db.collection('transactions').doc(), { type: 'Withdrawal (Pending)', userId: userId, amount: -amount, date: Date.now() });
+    });
+
+    res.json({ success: true, newBalance: data.balance - amount });
+  } catch (error) { res.status(500).json({ success: false, error: 'Server Error' }); }
+});
+
+// --- ADMIN: GET WITHDRAWALS ---
+app.get('/api/admin/withdrawals', async (req, res) => {
+  // Add your admin auth check here
+  const snapshot = await db.collection('withdrawals').where('status', '==', 'Pending').get();
+  res.json(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+});
+
+// --- ADMIN: APPROVE WITHDRAWAL ---
+app.post('/api/admin/approve-withdrawal', async (req, res) => {
+  const { withdrawalId } = req.body;
+  await db.collection('withdrawals').doc(withdrawalId).update({ status: 'Approved' });
+  res.json({ success: true });
+});
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
