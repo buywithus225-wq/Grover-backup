@@ -287,6 +287,41 @@ app.post('/api/transactions', requireTelegramUser, async (req, res) => {
     res.status(500).json({ success: false, error: 'Server Error' });
   }
 });
+// --- ADMIN: GET WITHDRAWALS ---
+app.get('/api/admin/withdrawals', async (req, res) => {
+  const { pin } = req.query;
+  if (pin !== ADMIN_PIN) return res.status(401).json({ error: 'Unauthorized' });
+  
+  const snapshot = await db.collection('withdrawals').where('status', '==', 'Pending').get();
+  res.json(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+});
+
+// --- ADMIN: APPROVE WITHDRAWAL ---
+app.post('/api/admin/approve-withdrawal', async (req, res) => {
+  const { withdrawalId } = req.body;
+  await db.collection('withdrawals').doc(withdrawalId).update({ status: 'Approved' });
+  res.json({ success: true });
+});
+
+// --- ADMIN: REJECT WITHDRAWAL (Refund) ---
+app.post('/api/admin/reject-withdrawal', async (req, res) => {
+  try {
+    const { withdrawalId } = req.body;
+    const wDoc = await db.collection('withdrawals').doc(withdrawalId).get();
+    if (!wDoc.exists) return res.status(404).json({ error: 'Not found' });
+    
+    const wData = wDoc.data();
+    const userRef = db.collection('users').doc(wData.userId);
+    const userDoc = await userRef.get();
+    
+    await db.runTransaction(async (t) => {
+      t.update(userRef, { balance: userDoc.data().balance + wData.amount });
+      t.update(db.collection('withdrawals').doc(withdrawalId), { status: 'Rejected' });
+    });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Server Error' }); }
+});
+
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
