@@ -35,7 +35,9 @@ const db = admin.firestore();
 const app = express();
 
 app.use(cors());
-app.use(express.static('public'));
+app.get('/admin.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 app.use(express.json({ limit: '100kb' }));
 
 // --- TELEGRAM AUTHENTICATION ---
