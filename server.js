@@ -292,6 +292,22 @@ async function sendMiningNotification(chatId) {
         });
     } catch (e) { console.log("Notification failed:", e); }
 }
+// --- ADMIN: GET DATA ---
+app.get('/api/admin/data', async (req, res) => {
+  try {
+    const doc = await db.collection('settings').doc('global').get();
+    if (!doc.exists) return res.json({ fakeUsers: [], tasks: [], prizePool: '50' });
+    res.json(doc.data());
+  } catch (e) { res.status(500).json({ error: 'Error' }); }
+});
+
+// --- ADMIN: SAVE DATA ---
+app.post('/api/admin/save', async (req, res) => {
+  try {
+    await db.collection('settings').doc('global').set(req.body, { merge: true });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Error' }); }
+});
 
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
