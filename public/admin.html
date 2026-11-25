@@ -58,6 +58,8 @@ button { background: #8b5cf6; cursor: pointer; font-weight: bold; border: none; 
 
     <div id="tab-economy" class="tab-content">
       <h3 style="font-size:14px; margin-bottom:10px;">Global Settings</h3>
+      <input type="text" id="announcementInput" placeholder="Global Announcement">
+<button onclick="saveSettings()">Save Settings</button>
       <input type="text" id="prizePool" placeholder="Prize Pool (TON)">
       <button onclick="saveSettings()">Save Prize Pool</button>
     </div>
@@ -123,11 +125,13 @@ function renderFakeUsers() {
 
 async function saveSettings() {
   adminData.prizePool = document.getElementById('prizePool').value;
+  adminData.announcement = document.getElementById('announcementInput').value;
+  
   await fetch(API + '/api/admin/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(adminData)
   });
-  alert('Saved!');
+  alert('Settings Saved! They will now reflect in the app.');
 }
 
 async function addTask() {
