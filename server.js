@@ -308,6 +308,50 @@ app.post('/api/admin/save', async (req, res) => {
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
+// --- SETTINGS ROUTE (Fetches Tasks, Fake Users, Announcements) ---
+app.get('/api/settings', async (req, res) => {
+  try {
+    const doc = await db.collection('settings').doc('global').get();
+    if (!doc.exists) return res.json({ fakeUsers: [], tasks: [], prizePool: '50', announcement: '', isFrozen: false });
+    res.json(doc.data());
+  } catch (e) { res.status(500).json({ error: 'Error' }); }
+});
+
+// --- FIXED P2P ROUTE ---
+app.post('/api/p2p', requireTelegramUser, async (req, res) => {
+  try {
+    const { recipientCode, amount } = req.body;
+    const senderId = String(req.telegramUser.id);
+    if (!recipientCode || amount <= 0 || amount > 10000) return res.status(400).json({ success: false, error: 'Invalid data' });
+
+    const senderRef = db.collection('users').doc(senderId);
+    const senderDoc = await senderRef.get();
+    const senderData = senderDoc.data();
+
+    const fee = amount * 0.05;
+    const totalDeducted = amount + fee;
+    if (senderData.balance < totalDeducted) return res.status(400).json({ success: false, error: 'Insufficient balance' });
+
+    // Find recipient (case insensitive)
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('referralCode', '==', recipientCode.toUpperCase()).get();
+    
+    if (snapshot.empty) return res.status(404).json({ success: false, error: 'Recipient not found' });
+
+    const recipientDoc = snapshot.docs[0];
+    const recipientData = recipientDoc.data();
+
+    await db.runTransaction(async (t) => {
+      t.update(senderRef, { balance: senderData.balance - totalDeducted });
+      t.update(db.collection('users').doc(recipientDoc.id), { balance: recipientData.balance + amount });
+      
+      t.set(db.collection('transactions').doc(), { type: 'P2P Sent', userId: senderId, amount: amount, fee: fee, to: recipientCode, date: Date.now() });
+      t.set(db.collection('transactions').doc(), { type: 'P2P Received', userId: recipientDoc.id, amount: amount, from: senderData.referralCode, date: Date.now() });
+    });
+
+    res.json({ success: true, newBalance: senderData.balance - totalDeducted });
+  } catch (error) { res.status(500).json({ success: false, error: 'Server Error' }); }
+});
 
 // --- START SERVER ---
 const PORT = process.env.PORT || 3000;
