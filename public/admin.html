@@ -14,31 +14,6 @@ button { background: #8b5cf6; cursor: pointer; font-weight: bold; border: none; 
 .list-item { background: #111; padding: 10px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
 .btn-approve { background: #22c55e; padding: 5px 10px; width: auto; font-size: 10px; margin: 0 2px; }
 .btn-reject { background: #ef4444; padding: 5px 10px; width: auto; font-size: 10px; margin: 0 2px; }
-</style>
-</head>
-<body>
-<div class="container">
-  <div id="login">
-    <h2>🔐 Grover Admin</h2>
-    <input type="password" id="pin" placeholder="Enter Admin PIN">
-    <button onclick="verifyPin()">Unlock</button>
-  </div>
-  
-  <div id="dashboard">
-    <h2>Dashboard</h2>
-    
-    <div class="section-title">💸 Pending Withdrawals</div>
-    <div id="withdrawalList"></div>
-
-    <div class="section-title">📋 Tasks</div>
-    <div id="taskList"></div>
-    <div style="display:flex; gap:5px;">
-      <input type="text" id="taskName" placeholder="Task Name">
-      <input type="number" id="taskReward" placeholder="Reward">
-      <button onclick="addTask()" style="width:auto;">+</button>
-    </div>
-  </div>
-</div>
 <script>
 const API = 'https://grover-backup.onrender.com'; 
 let adminPin = '';
@@ -46,40 +21,55 @@ let adminData = { tasks: [] };
 
 async function verifyPin() {
   adminPin = document.getElementById('pin').value;
-  const res = await fetch(API + '/api/admin/verify', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ pin: adminPin })
-  });
-  if (res.ok) {
-    document.getElementById('login').style.display = 'none';
-    document.getElementById('dashboard').style.display = 'block';
-    loadData();
-  } else { alert('Wrong PIN'); }
+  try {
+    const res = await fetch(API + '/api/admin/verify', {
+      method: 'POST', 
+      headers: {'Content-Type': 'application/json'}, 
+      body: JSON.stringify({ pin: adminPin })
+    });
+    
+    if (res.ok) {
+      document.getElementById('login').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      loadData();
+    } else {
+      const errorText = await res.text();
+      alert('❌ Server rejected PIN. Make sure ADMIN_PIN is set in Render. Server says: ' + errorText);
+    }
+  } catch (err) {
+    alert('❌ Network Error: Render might be asleep or crashed. ' + err.message);
+  }
 }
 
 async function loadData() {
-  // Load Withdrawals
-  const wRes = await fetch(API + '/api/admin/withdrawals?pin=' + adminPin);
-  const withdrawals = await wRes.json();
-  const wList = document.getElementById('withdrawalList'); wList.innerHTML = '';
-  
-  if(withdrawals.length === 0) wList.innerHTML = '<div style="font-size:11px;color:#555;">No pending withdrawals.</div>';
-  
-  withdrawals.forEach(w => {
-    wList.innerHTML += `
-      <div class="list-item">
-        <div>User: ${w.userId.slice(-6)}<br>Amt: ${w.amount} GROV<br>Wallet: ${w.walletAddress.slice(0,6)}...</div>
-        <div>
-          <button class="btn-approve" onclick="approveW('${w.id}')">Approve</button>
-          <button class="btn-reject" onclick="rejectW('${w.id}')">Reject</button>
-        </div>
-      </div>`;
-  });
+  try {
+    // Load Withdrawals
+    const wRes = await fetch(API + '/api/admin/withdrawals?pin=' + adminPin);
+    if (!wRes.ok) throw new Error("Failed to load withdrawals");
+    const withdrawals = await wRes.json();
+    const wList = document.getElementById('withdrawalList'); wList.innerHTML = '';
+    
+    if(withdrawals.length === 0) wList.innerHTML = '<div style="font-size:11px;color:#555;">No pending withdrawals.</div>';
+    
+    withdrawals.forEach(w => {
+      wList.innerHTML += `
+        <div class="list-item">
+          <div>User: ${w.userId.slice(-6)}<br>Amt: ${w.amount} GROV<br>Wallet: ${w.walletAddress.slice(0,6)}...</div>
+          <div>
+            <button class="btn-approve" onclick="approveW('${w.id}')">Approve</button>
+            <button class="btn-reject" onclick="rejectW('${w.id}')">Reject</button>
+          </div>
+        </div>`;
+    });
 
-  // Load Tasks
-  const res = await fetch(API + '/api/admin/data');
-  const data = await res.json();
-  adminData.tasks = data.tasks || [];
-  renderTasks();
+    // Load Tasks
+    const res = await fetch(API + '/api/admin/data');
+    const data = await res.json();
+    adminData.tasks = data.tasks || [];
+    renderTasks();
+  } catch (err) {
+    alert("Error loading data: " + err.message);
+  }
 }
 
 function renderTasks() {
@@ -110,7 +100,7 @@ async function approveW(id) {
     body: JSON.stringify({ withdrawalId: id })
   });
   loadData();
-  alert(' Withdrawal Approved! (Pending Token Launch)');.');
+  alert('✅ Withdrawal Approved! (Pending Token Launch)');
 }
 
 async function rejectW(id) {
@@ -119,7 +109,7 @@ async function rejectW(id) {
     body: JSON.stringify({ withdrawalId: id })
   });
   loadData();
-  alert('Rejected! Balance refunded to user.');
+  alert('❌ Rejected! Balance refunded to user.');
 }
 </script>
 </body>
